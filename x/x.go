@@ -4,7 +4,8 @@ import "time"
 
 type WarriorTask struct {
 	Assignee  string
-	Completed bool
+	Completed time.Time
+	Created   time.Time
 	Modified  time.Time
 	Name      string
 	Project   string

@@ -62,17 +62,18 @@ func getVarious(suffix string, opts ...string) ([]Basic, error) {
 
 type task struct {
 	Basic
-	Assignee   Basic   `json:"assignee"`
-	Tags       []Basic `json:"tags"`
-	Completed  bool    `json:"completed"`
-	ModifiedAt string  `json:"modified_at"`
+	Assignee    Basic   `json:"assignee"`
+	Tags        []Basic `json:"tags"`
+	CompletedAt string  `json:"completed_at"`
+	ModifiedAt  string  `json:"modified_at"`
+	CreatedAt   string  `json:"created_at"`
 }
 
 type tasks struct {
 	Data []task `json:"data"`
 }
 
-func GetTasks() ([]x.WarriorTask, error) {
+func GetTasks(max int) ([]x.WarriorTask, error) {
 	projects, err := getVarious("projects")
 	if err != nil {
 		return nil, err
@@ -100,17 +101,18 @@ func GetTasks() ([]x.WarriorTask, error) {
 
 	wtasks := make([]x.WarriorTask, 0, 100)
 	var section string
+	count := 0
+LOOP:
 	for _, proj := range projects {
 		var t tasks
 		if err := runGetter(&t, fmt.Sprintf("projects/%d/tasks", proj.Id),
-			"assignee,name,tags,completed,modified_at"); err != nil {
+			"assignee,name,tags,completed_at,modified_at,created_at"); err != nil {
 			return nil, err
 		}
 		for _, tsk := range t.Data {
 			if strings.HasSuffix(tsk.Name, ":") {
 				section = strings.Map(func(r rune) rune {
-					alph := 'A' <= r && r <= 'Z' || 'a' <= r && r <= 'z' || '0' <= r && r <= '9'
-					if alph {
+					if 'A' <= r && r <= 'Z' || 'a' <= r && r <= 'z' || '0' <= r && r <= '9' {
 						return r
 					}
 					return -1
@@ -118,23 +120,38 @@ func GetTasks() ([]x.WarriorTask, error) {
 
 				continue
 			}
-			ts, err := time.Parse(stamp, tsk.ModifiedAt)
+
+			mts, err := time.Parse(stamp, tsk.ModifiedAt)
 			if err != nil {
 				return nil, err
 			}
+			cts, err := time.Parse(stamp, tsk.CreatedAt)
+			if err != nil {
+				return nil, err
+			}
+			dts, err := time.Parse(stamp, tsk.CompletedAt)
+			if err != nil {
+				return nil, err
+			}
+
 			wt := x.WarriorTask{
 				Name:      tsk.Name,
 				Project:   proj.Name,
 				Xid:       tsk.Id,
-				Completed: tsk.Completed,
 				Assignee:  usermap[tsk.Assignee.Id],
-				Modified:  ts,
+				Modified:  mts,
+				Created:   cts,
+				Completed: dts,
 				Section:   section,
 			}
 			for _, tag := range tsk.Tags {
 				wt.Tags = append(wt.Tags, tagmap[tag.Id])
 			}
 			wtasks = append(wtasks, wt)
+			count++
+			if count >= max {
+				break LOOP
+			}
 		}
 	}
 	return wtasks, nil

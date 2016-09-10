@@ -13,12 +13,15 @@ func main() {
 	flag.Parse()
 	fmt.Println("vim-go")
 
-	tasks, err := asana.GetTasks()
+	tasks, err := asana.GetTasks(1)
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println(len(tasks), "results found")
 	for _, t := range tasks {
+		if err := taskwarrior.AddNew(t); err != nil {
+			log.Fatal(err)
+		}
 		fmt.Printf("%+v\n", t)
 	}
 
