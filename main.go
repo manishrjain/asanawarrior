@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 
 	"github.com/manishrjain/asanawarrior/asana"
 )
@@ -10,5 +11,12 @@ import (
 func main() {
 	flag.Parse()
 	fmt.Println("vim-go")
-	asana.Users()
+	tasks, err := asana.GetTasks()
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(len(tasks), "results found")
+	for _, t := range tasks {
+		fmt.Printf("%v\n", t)
+	}
 }
