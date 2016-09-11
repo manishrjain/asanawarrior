@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/manishrjain/asanawarrior/x"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -17,14 +18,14 @@ const (
 )
 
 type task struct {
-	Completed   string   `json:"end"`
+	Completed   string   `json:"end,omitempty"`
 	Created     string   `json:"entry"`
 	Description string   `json:"description"`
 	Modified    string   `json:"modified"`
 	Project     string   `json:"project"`
 	Status      string   `json:"status"`
 	Tags        []string `json:"tags"`
-	Uuid        string   `json:"uuid"`
+	Uuid        string   `json:"uuid,omitempty"`
 	Xid         string   `json:"xid"`
 }
 
@@ -38,9 +39,12 @@ func (t task) ToWarriorTask() (x.WarriorTask, error) {
 	if err != nil {
 		return empty, err
 	}
-	dts, err := time.Parse(stamp, t.Completed)
-	if err != nil {
-		return empty, err
+	var dts time.Time
+	if len(t.Completed) > 0 {
+		dts, err = time.Parse(stamp, t.Completed)
+		if err != nil {
+			return empty, err
+		}
 	}
 
 	var ass, sec string
@@ -65,15 +69,18 @@ func (t task) ToWarriorTask() (x.WarriorTask, error) {
 	}
 
 	wt := x.WarriorTask{
-		Assignee:  ass,
-		Completed: dts,
-		Created:   cts,
-		Modified:  mts,
-		Name:      t.Description,
-		Project:   t.Project,
-		Section:   sec,
-		Tags:      tags,
-		Xid:       xid,
+		Assignee: ass,
+		Created:  cts,
+		Modified: mts,
+		Name:     t.Description,
+		Project:  t.Project,
+		Section:  sec,
+		Tags:     tags,
+		Xid:      xid,
+		Uuid:     t.Uuid,
+	}
+	if !dts.IsZero() {
+		wt.Completed = dts
 	}
 	return wt, nil
 }
@@ -111,23 +118,27 @@ func GetTasks() ([]x.WarriorTask, error) {
 	return wtasks, nil
 }
 
-func createNew(wt x.WarriorTask) task {
-	status := "pending"
-	if !wt.Completed.IsZero() {
-		status = "completed"
-	}
-
+func generateTags(wt x.WarriorTask) []string {
 	tags := make([]string, 0, 10)
 	copy(tags, wt.Tags)
+
 	if len(wt.Assignee) > 0 {
 		tags = append(tags, "@"+wt.Assignee)
 	}
 	if len(wt.Section) > 0 {
 		tags = append(tags, "#"+wt.Section)
 	}
+	return tags
+}
+
+func createNew(wt x.WarriorTask) task {
+	status := "pending"
+	if !wt.Completed.IsZero() {
+		status = "completed"
+	}
+	tags := generateTags(wt)
 
 	t := task{
-		Completed:   wt.Completed.Format(stamp),
 		Created:     wt.Created.Format(stamp),
 		Description: wt.Name,
 		Modified:    wt.Modified.Format(stamp),
@@ -136,11 +147,13 @@ func createNew(wt x.WarriorTask) task {
 		Tags:        tags,
 		Xid:         strconv.FormatUint(wt.Xid, 10),
 	}
+	if !wt.Completed.IsZero() {
+		t.Completed = wt.Completed.Format(stamp)
+	}
 	return t
 }
 
-func AddNew(wt x.WarriorTask) error {
-	t := createNew(wt)
+func doImport(t task) error {
 	body, err := json.Marshal(t)
 	if err != nil {
 		return err
@@ -149,8 +162,19 @@ func AddNew(wt x.WarriorTask) error {
 	cmd := fmt.Sprintf("echo -n %q | task import", body)
 	out, err := exec.Command("bash", "-c", cmd).Output()
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "doImport [%v] out:%q", cmd, out)
 	}
 	fmt.Println(string(out))
 	return nil
+}
+
+func AddNew(wt x.WarriorTask) error {
+	t := createNew(wt)
+	return doImport(t)
+}
+
+func OverwriteUuid(asana x.WarriorTask, uuid string) error {
+	t := createNew(asana)
+	t.Uuid = uuid
+	return doImport(t)
 }

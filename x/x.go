@@ -12,4 +12,5 @@ type WarriorTask struct {
 	Section   string
 	Tags      []string
 	Xid       uint64
+	Uuid      string
 }

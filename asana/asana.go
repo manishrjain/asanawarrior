@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/manishrjain/asanawarrior/x"
+	"github.com/pkg/errors"
 )
 
 var token = flag.String("token", "", "Token provided by Asana.")
@@ -110,6 +111,11 @@ LOOP:
 			return nil, err
 		}
 		for _, tsk := range t.Data {
+			if len(tsk.Name) == 0 {
+				// Don't sync such tasks.
+				continue
+			}
+
 			if strings.HasSuffix(tsk.Name, ":") {
 				section = strings.Map(func(r rune) rune {
 					if 'A' <= r && r <= 'Z' || 'a' <= r && r <= 'z' || '0' <= r && r <= '9' {
@@ -120,18 +126,24 @@ LOOP:
 
 				continue
 			}
-
 			mts, err := time.Parse(stamp, tsk.ModifiedAt)
 			if err != nil {
-				return nil, err
+				return nil, errors.Wrap(err, "asana modified at")
 			}
 			cts, err := time.Parse(stamp, tsk.CreatedAt)
 			if err != nil {
-				return nil, err
+				return nil, errors.Wrap(err, "asana created at")
 			}
-			dts, err := time.Parse(stamp, tsk.CompletedAt)
-			if err != nil {
-				return nil, err
+			var dts time.Time
+			if len(tsk.CompletedAt) > 0 {
+				dts, err = time.Parse(stamp, tsk.CompletedAt)
+				if err != nil {
+					return nil, errors.Wrap(err, "asana completed at")
+				}
+			} else {
+				if !dts.IsZero() {
+					log.Fatalf("This should be zero")
+				}
 			}
 
 			wt := x.WarriorTask{
