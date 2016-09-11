@@ -1,8 +1,11 @@
 package asana
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -23,6 +26,32 @@ type acache struct {
 	sections    map[uint64]*asection
 }
 
+func printBasics(title string, bs []Basic) {
+	for _, b := range bs {
+		if len(b.Email) > 0 {
+			fmt.Printf("%9s %16s %s\n", title, strconv.FormatUint(b.Id, 10), b.Email)
+		} else {
+			fmt.Printf("%9s %16s %s\n", title, strconv.FormatUint(b.Id, 10), b.Name)
+		}
+	}
+	fmt.Println()
+}
+
+// updateTags updates the tags. Appropriate locks should be acquired by the caller.
+func (c *acache) updateTags() error {
+	var err error
+	c.tags, err = getVarious("tags")
+	if err != nil {
+		return err
+	}
+	c.tagmap = make(map[uint64]string)
+	for _, t := range c.tags {
+		c.tagmap[t.Id] = t.Name
+	}
+	printBasics("Tag", c.tags)
+	return nil
+}
+
 func (c *acache) update() error {
 	c.Lock()
 	defer c.Unlock()
@@ -32,7 +61,7 @@ func (c *acache) update() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(c.workspaces)
+	printBasics("Workspace", c.workspaces)
 	for _, w := range c.workspaces {
 		if w.Name == *domain {
 			c.defaultWork = w.Id
@@ -46,17 +75,11 @@ func (c *acache) update() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(c.projects)
+	printBasics("Project", c.projects)
 
-	c.tags, err = getVarious("tags")
-	if err != nil {
+	if err := c.updateTags(); err != nil {
 		return err
 	}
-	c.tagmap = make(map[uint64]string)
-	for _, t := range c.tags {
-		c.tagmap[t.Id] = t.Name
-	}
-	fmt.Println(c.tagmap)
 
 	c.users, err = getVarious("users", "email")
 	if err != nil {
@@ -71,8 +94,7 @@ func (c *acache) update() error {
 	for _, u := range c.users {
 		c.usermap[u.Id] = u.Email
 	}
-	fmt.Println(c.users)
-	fmt.Println(c.usermap)
+	printBasics("User", c.users)
 	c.sections = make(map[uint64]*asection)
 	return nil
 }
@@ -134,6 +156,34 @@ func (c *acache) TagId(tname string) uint64 {
 		}
 	}
 	return 0
+}
+
+func (c *acache) CreateTag(tname string) uint64 {
+	c.Lock()
+	defer c.Unlock()
+
+	// Just double check after acquiring lock.
+	for _, t := range c.tags {
+		if t.Name == tname {
+			return t.Id
+		}
+	}
+
+	v := url.Values{}
+	v.Add("workspace", strconv.FormatUint(c.defaultWork, 10))
+	v.Add("name", tname)
+	resp, err := runPost("tags", v)
+	if err != nil {
+		return 0
+	}
+	var bdo BasicDataOne
+	if err := json.Unmarshal(resp, &bdo); err != nil {
+		return 0
+	}
+	c.tags = append(c.tags, bdo.Data)
+	c.tagmap[bdo.Data.Id] = bdo.Data.Name
+
+	return bdo.Data.Id
 }
 
 func (c *acache) AddSection(projId uint64, sec Basic) string {

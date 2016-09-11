@@ -60,7 +60,16 @@ func approxAfter(t1, t2 time.Time) bool {
 
 func syncMatch(m *Match) error {
 	if m.Xid == 0 {
-		fmt.Println("To ASANA:", m.TaskWr.Name)
+		// Task not present in Asana, but present in TW.
+
+		if m.TaskWr.Xid > 0 {
+			// This task used to have an Asana ID. But, we can't find the corresponding Asana task.
+			// It can happen when Asana task was deleted.
+			// If so, delete the task from TW as well.
+			return taskwarrior.Delete(m.TaskWr)
+		}
+
+		fmt.Printf("Create in Asana: [%q]\n", m.TaskWr.Name)
 		final, err := asana.AddNew(m.TaskWr)
 		if err != nil {
 			return err
@@ -72,7 +81,7 @@ func syncMatch(m *Match) error {
 	return nil
 
 	if m.TaskWr.Xid == 0 {
-		fmt.Printf("Add to TASKW: [%q]\n", m.Asana.Name)
+		fmt.Printf("Create in Taskwarrior: [%q]\n", m.Asana.Name)
 		return taskwarrior.AddNew(m.Asana)
 	}
 
@@ -81,12 +90,13 @@ func syncMatch(m *Match) error {
 	}
 
 	if approxAfter(m.Asana.Modified, m.TaskWr.Modified) {
-		fmt.Printf("Overwrite TASKW: [%q]\n", m.Asana.Name)
+		fmt.Printf("Overwrite Taskwarrior: [%q]\n", m.Asana.Name)
 		return taskwarrior.OverwriteUuid(m.Asana, m.TaskWr.Uuid)
 	}
 
 	if approxAfter(m.TaskWr.Modified, m.Asana.Modified) {
-		fmt.Println("PRESENT,To ASANA:", m.Asana.Name)
+		fmt.Printf("Overwrite Asana: [%q]\n", m.Asana.Name)
+		// TODO: Implement this.
 		return nil
 	}
 

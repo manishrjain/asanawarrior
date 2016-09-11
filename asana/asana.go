@@ -57,6 +57,9 @@ type Basic struct {
 type BasicData struct {
 	Data []Basic `json:"data"`
 }
+type BasicDataOne struct {
+	Data Basic `json:"data"`
+}
 
 func getVarious(suffix string, opts ...string) ([]Basic, error) {
 	var bd BasicData
@@ -167,6 +170,7 @@ LOOP:
 	return wtasks, nil
 }
 
+// runPost would run a POST to Asana. No locks should be acquired.
 func runPost(suffix string, values url.Values) ([]byte, error) {
 	url := fmt.Sprintf("%s/%s", prefix, suffix)
 	fmt.Println(url, values.Encode())
@@ -205,10 +209,12 @@ func AddNew(wt x.WarriorTask) (x.WarriorTask, error) {
 	var tags []string
 	for _, t := range wt.Tags {
 		tid := cache.TagId(t)
+		if tid == 0 {
+			tid = cache.CreateTag(t)
+			fmt.Println("New Tag crated. ID: %d", tid)
+		}
 		if tid > 0 {
 			tags = append(tags, strconv.FormatUint(tid, 10))
-		} else {
-			// Generate TAG.
 		}
 	}
 	v.Add("tags", strings.Join(tags, ","))

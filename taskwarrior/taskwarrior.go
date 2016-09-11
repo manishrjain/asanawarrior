@@ -19,14 +19,14 @@ const (
 
 type task struct {
 	Completed   string   `json:"end,omitempty"`
-	Created     string   `json:"entry"`
-	Description string   `json:"description"`
-	Modified    string   `json:"modified"`
-	Project     string   `json:"project"`
-	Status      string   `json:"status"`
-	Tags        []string `json:"tags"`
+	Created     string   `json:"entry,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Modified    string   `json:"modified,omitempty"`
+	Project     string   `json:"project,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
 	Uuid        string   `json:"uuid,omitempty"`
-	Xid         string   `json:"xid"`
+	Xid         string   `json:"xid,omitempty"`
 }
 
 func (t task) ToWarriorTask() (x.WarriorTask, error) {
@@ -109,6 +109,10 @@ func GetTasks() ([]x.WarriorTask, error) {
 
 	wtasks := make([]x.WarriorTask, 0, 100)
 	for _, t := range tasks {
+		if t.Status == "deleted" {
+			continue
+		}
+
 		if wt, err := t.ToWarriorTask(); err == nil {
 			wtasks = append(wtasks, wt)
 		} else {
@@ -176,5 +180,13 @@ func AddNew(wt x.WarriorTask) error {
 func OverwriteUuid(asana x.WarriorTask, uuid string) error {
 	t := createNew(asana)
 	t.Uuid = uuid
+	return doImport(t)
+}
+
+func Delete(prev x.WarriorTask) error {
+	prev.Completed = time.Now()
+	t := createNew(prev)
+	t.Uuid = prev.Uuid
+	t.Status = "deleted"
 	return doImport(t)
 }
