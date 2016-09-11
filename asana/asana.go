@@ -1,12 +1,15 @@
 package asana
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +18,7 @@ import (
 )
 
 var token = flag.String("token", "", "Token provided by Asana.")
+var domain = flag.String("domain", "", "Workspace name, generally your domain name in Asana.")
 var cache *acache = new(acache)
 
 const (
@@ -62,6 +66,11 @@ func getVarious(suffix string, opts ...string) ([]Basic, error) {
 	return bd.Data, nil
 }
 
+type psec struct {
+	Project Basic `json:"project"`
+	Section Basic `json:"section"`
+}
+
 type task struct {
 	Basic
 	Assignee    Basic   `json:"assignee"`
@@ -69,10 +78,15 @@ type task struct {
 	CompletedAt string  `json:"completed_at"`
 	ModifiedAt  string  `json:"modified_at"`
 	CreatedAt   string  `json:"created_at"`
+	Memberships []psec  `json:"memberships"`
 }
 
 type tasks struct {
 	Data []task `json:"data"`
+}
+
+type oneTask struct {
+	Data task `json:"data"`
 }
 
 func convert(tsk task, proj, section string) (x.WarriorTask, error) {
@@ -116,7 +130,7 @@ func GetTasks(max int) ([]x.WarriorTask, error) {
 	}
 
 	wtasks := make([]x.WarriorTask, 0, 100)
-	var section string
+	var sectionName string
 	count := 0
 LOOP:
 	for _, proj := range cache.Projects() {
@@ -131,16 +145,15 @@ LOOP:
 				continue
 			}
 			if strings.HasSuffix(tsk.Name, ":") {
-				section = strings.Map(func(r rune) rune {
-					if 'A' <= r && r <= 'Z' || 'a' <= r && r <= 'z' || '0' <= r && r <= '9' {
-						return r
-					}
-					return -1
-				}, tsk.Name)
-
+				sec := Basic{
+					Id:   tsk.Id,
+					Name: tsk.Name,
+				}
+				sectionName = cache.AddSection(proj.Id, sec)
 				continue
 			}
-			wt, err := convert(tsk, proj.Name, section)
+
+			wt, err := convert(tsk, proj.Name, sectionName)
 			if err != nil {
 				return nil, errors.Wrap(err, "GetTasks")
 			}
@@ -154,6 +167,86 @@ LOOP:
 	return wtasks, nil
 }
 
-func AddNew(wt x.WarriorTask) error {
-	return nil
+func runPost(suffix string, values url.Values) ([]byte, error) {
+	url := fmt.Sprintf("%s/%s", prefix, suffix)
+	fmt.Println(url, values.Encode())
+	req, err := http.NewRequest("POST", url, bytes.NewBufferString(values.Encode()))
+	if err != nil {
+		log.Fatal(errors.Wrap(err, "runPost http.NewRequest"))
+	}
+
+	req.Header.Add("Authorization", "Bearer "+*token)
+	req.Header.Add("content-type", "application/x-www-form-urlencoded")
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	defer resp.Body.Close()
+
+	return ioutil.ReadAll(resp.Body)
+}
+
+func AddNew(wt x.WarriorTask) (x.WarriorTask, error) {
+	e := x.WarriorTask{}
+
+	// Ensure that project actually exists before proceeding.
+	pid := cache.ProjectId(wt.Project)
+	if pid == 0 {
+		return e, fmt.Errorf("Project not found: %v", wt.Project)
+	}
+
+	v := url.Values{}
+	v.Add("workspace", strconv.FormatUint(cache.Workspace(), 10))
+	v.Add("name", wt.Name)
+	fmt.Println("Assignee", wt.Assignee)
+	aid := cache.UserId(wt.Assignee)
+	if aid > 0 {
+		v.Add("assignee", strconv.FormatUint(aid, 10))
+	}
+
+	var tags []string
+	for _, t := range wt.Tags {
+		tid := cache.TagId(t)
+		if tid > 0 {
+			tags = append(tags, strconv.FormatUint(tid, 10))
+		} else {
+			// Generate TAG.
+		}
+	}
+	v.Add("tags", strings.Join(tags, ","))
+	resp, err := runPost("tasks", v)
+	if err != nil {
+		return e, errors.Wrap(err, "AddNew runPost")
+	}
+	fmt.Println(string(resp))
+
+	var ot oneTask
+	if err := json.Unmarshal(resp, &ot); err != nil {
+		return e, errors.Wrap(err, "AddNew unmarshal")
+	}
+	if ot.Data.Id == 0 {
+		return e, fmt.Errorf("Unable to find ID assigned by Asana: %+v", ot.Data)
+	}
+
+	// Now set the project and section.
+	sid := cache.SectionId(pid, wt.Section)
+	v = url.Values{}
+	v.Add("project", strconv.FormatUint(pid, 10))
+	if sid > 0 {
+		v.Add("section", strconv.FormatUint(sid, 10))
+	}
+	_, err = runPost(fmt.Sprintf("tasks/%d/addProject", ot.Data.Id), v)
+	if err != nil {
+		return e, errors.Wrap(err, "addProject runPost")
+	}
+
+	// Now retrieve the task back again so we can sync it up with TW.
+	if err := runGetter(&ot, "tasks/"+strconv.FormatUint(ot.Data.Id, 10)); err != nil {
+		return e, errors.Wrap(err, "AddNew runGetter")
+	}
+	if len(ot.Data.Memberships) == 0 {
+		return e, fmt.Errorf("Member of no project")
+	}
+	member := ot.Data.Memberships[0]
+
+	sname := cache.SectionName(member.Project.Id, member.Section.Id)
+	return convert(ot.Data, member.Project.Name, sname)
 }

@@ -61,8 +61,15 @@ func approxAfter(t1, t2 time.Time) bool {
 func syncMatch(m *Match) error {
 	if m.Xid == 0 {
 		fmt.Println("To ASANA:", m.TaskWr.Name)
-		return nil
+		final, err := asana.AddNew(m.TaskWr)
+		if err != nil {
+			return err
+		}
+		return taskwarrior.OverwriteUuid(final, m.TaskWr.Uuid)
 	}
+
+	// HACK
+	return nil
 
 	if m.TaskWr.Xid == 0 {
 		fmt.Printf("Add to TASKW: [%q]\n", m.Asana.Name)
@@ -92,6 +99,7 @@ func main() {
 	fmt.Println("vim-go")
 
 	atasks, err := asana.GetTasks(9999999)
+	// atasks, err := asana.GetTasks(1)
 	if err != nil {
 		log.Fatal(err)
 	}
