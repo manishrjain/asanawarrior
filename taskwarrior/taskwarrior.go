@@ -119,7 +119,7 @@ func GetTasks() ([]x.WarriorTask, error) {
 }
 
 func generateTags(wt x.WarriorTask) []string {
-	tags := make([]string, 0, 10)
+	tags := make([]string, len(wt.Tags), len(wt.Tags)+2)
 	copy(tags, wt.Tags)
 
 	if len(wt.Assignee) > 0 {
