@@ -15,6 +15,7 @@ import (
 )
 
 var token = flag.String("token", "", "Token provided by Asana.")
+var cache *acache = new(acache)
 
 const (
 	prefix = "https://app.asana.com/api/1.0"
@@ -74,37 +75,51 @@ type tasks struct {
 	Data []task `json:"data"`
 }
 
+func convert(tsk task, proj, section string) (x.WarriorTask, error) {
+	e := x.WarriorTask{}
+
+	mts, err := time.Parse(stamp, tsk.ModifiedAt)
+	if err != nil {
+		return e, errors.Wrap(err, "asana modified at")
+	}
+	cts, err := time.Parse(stamp, tsk.CreatedAt)
+	if err != nil {
+		return e, errors.Wrap(err, "asana created at")
+	}
+	var dts time.Time
+	if len(tsk.CompletedAt) > 0 {
+		dts, err = time.Parse(stamp, tsk.CompletedAt)
+		if err != nil {
+			return e, errors.Wrap(err, "asana completed at")
+		}
+	}
+
+	wt := x.WarriorTask{
+		Name:      tsk.Name,
+		Project:   proj,
+		Xid:       tsk.Id,
+		Assignee:  cache.User(tsk.Assignee.Id),
+		Modified:  mts,
+		Created:   cts,
+		Completed: dts,
+		Section:   section,
+	}
+	for _, tag := range tsk.Tags {
+		wt.Tags = append(wt.Tags, cache.Tag(tag.Id))
+	}
+	return wt, nil
+}
+
 func GetTasks(max int) ([]x.WarriorTask, error) {
-	projects, err := getVarious("projects")
-	if err != nil {
-		return nil, err
-	}
-
-	alltags, err := getVarious("tags")
-	if err != nil {
-		return nil, err
-	}
-
-	tagmap := make(map[uint64]string)
-	for _, t := range alltags {
-		tagmap[t.Id] = t.Name
-	}
-
-	allusers, err := getVarious("users", "email")
-	if err != nil {
-		return nil, err
-	}
-	usermap := make(map[uint64]string)
-	for _, u := range allusers {
-		email := strings.Split(u.Email, "@")
-		usermap[u.Id] = email[0]
+	if err := cache.update(); err != nil {
+		return nil, errors.Wrap(err, "cache.update")
 	}
 
 	wtasks := make([]x.WarriorTask, 0, 100)
 	var section string
 	count := 0
 LOOP:
-	for _, proj := range projects {
+	for _, proj := range cache.Projects() {
 		var t tasks
 		if err := runGetter(&t, fmt.Sprintf("projects/%d/tasks", proj.Id),
 			"assignee,name,tags,completed_at,modified_at,created_at"); err != nil {
@@ -115,7 +130,6 @@ LOOP:
 				// Don't sync such tasks.
 				continue
 			}
-
 			if strings.HasSuffix(tsk.Name, ":") {
 				section = strings.Map(func(r rune) rune {
 					if 'A' <= r && r <= 'Z' || 'a' <= r && r <= 'z' || '0' <= r && r <= '9' {
@@ -126,38 +140,9 @@ LOOP:
 
 				continue
 			}
-			mts, err := time.Parse(stamp, tsk.ModifiedAt)
+			wt, err := convert(tsk, proj.Name, section)
 			if err != nil {
-				return nil, errors.Wrap(err, "asana modified at")
-			}
-			cts, err := time.Parse(stamp, tsk.CreatedAt)
-			if err != nil {
-				return nil, errors.Wrap(err, "asana created at")
-			}
-			var dts time.Time
-			if len(tsk.CompletedAt) > 0 {
-				dts, err = time.Parse(stamp, tsk.CompletedAt)
-				if err != nil {
-					return nil, errors.Wrap(err, "asana completed at")
-				}
-			} else {
-				if !dts.IsZero() {
-					log.Fatalf("This should be zero")
-				}
-			}
-
-			wt := x.WarriorTask{
-				Name:      tsk.Name,
-				Project:   proj.Name,
-				Xid:       tsk.Id,
-				Assignee:  usermap[tsk.Assignee.Id],
-				Modified:  mts,
-				Created:   cts,
-				Completed: dts,
-				Section:   section,
-			}
-			for _, tag := range tsk.Tags {
-				wt.Tags = append(wt.Tags, tagmap[tag.Id])
+				return nil, errors.Wrap(err, "GetTasks")
 			}
 			wtasks = append(wtasks, wt)
 			count++
@@ -167,4 +152,8 @@ LOOP:
 		}
 	}
 	return wtasks, nil
+}
+
+func AddNew(wt x.WarriorTask) error {
+	return nil
 }
