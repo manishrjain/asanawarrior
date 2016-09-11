@@ -27,6 +27,8 @@ type acache struct {
 }
 
 func printBasics(title string, bs []Basic) {
+	return // Avoid unnecessary output. Useful for debugging.
+
 	for _, b := range bs {
 		if len(b.Email) > 0 {
 			fmt.Printf("%9s %16s %s\n", title, strconv.FormatUint(b.Id, 10), b.Email)

@@ -11,6 +11,8 @@ import (
 	"github.com/manishrjain/asanawarrior/x"
 )
 
+var duration = flag.Int("dur", 1, "How often to run sync, specified in minutes.")
+
 type Match struct {
 	Xid    uint64
 	Asana  x.WarriorTask
@@ -100,11 +102,8 @@ func syncMatch(m *Match) error {
 	return nil
 }
 
-func main() {
-	flag.Parse()
-	fmt.Println("vim-go")
-
-	atasks, err := asana.GetTasks(9999999)
+func runSync() {
+	atasks, err := asana.GetTasks()
 	// atasks, err := asana.GetTasks(1)
 	if err != nil {
 		log.Fatal(err)
@@ -124,4 +123,21 @@ func main() {
 		}
 	}
 	fmt.Println("All synced up. DONE.")
+}
+
+func main() {
+	flag.Parse()
+	fmt.Println("Asanawarrior v0.7 - Bringing the power of Taskwarrior to Asana")
+
+	// Initiate a sync right away.
+	fmt.Println()
+	fmt.Println("Starting sync at", time.Now())
+	runSync()
+
+	// And then do it at regular intervals.
+	for t := range time.Tick(time.Duration(*duration) * time.Minute) {
+		fmt.Println()
+		fmt.Println("Starting sync at", t)
+		runSync()
+	}
 }

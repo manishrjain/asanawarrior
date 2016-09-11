@@ -128,47 +128,69 @@ func convert(tsk task, proj, section string) (x.WarriorTask, error) {
 	return wt, nil
 }
 
-func GetTasks(max int) ([]x.WarriorTask, error) {
+func getTasks(proj Basic, out chan x.WarriorTask, errc chan error) {
+	var sectionName string
+	var t tasks
+	if err := runGetter(&t, fmt.Sprintf("projects/%d/tasks", proj.Id),
+		"assignee,name,tags,completed_at,modified_at,created_at"); err != nil {
+		errc <- errors.Wrapf(err, "getTasks for project: %v", proj.Name)
+		return
+	}
+
+	for _, tsk := range t.Data {
+		if len(tsk.Name) == 0 {
+			// Don't sync such tasks.
+			continue
+		}
+		if strings.HasSuffix(tsk.Name, ":") {
+			sec := Basic{
+				Id:   tsk.Id,
+				Name: tsk.Name,
+			}
+			sectionName = cache.AddSection(proj.Id, sec)
+			continue
+		}
+
+		wt, err := convert(tsk, proj.Name, sectionName)
+		if err != nil {
+			errc <- errors.Wrapf(err, "convert: getTasks for project: %v", proj.Name)
+			return
+		}
+		out <- wt
+	}
+	errc <- nil
+}
+
+func GetTasks() ([]x.WarriorTask, error) {
 	if err := cache.update(); err != nil {
 		return nil, errors.Wrap(err, "cache.update")
 	}
 
-	wtasks := make([]x.WarriorTask, 0, 100)
-	var sectionName string
-	count := 0
-LOOP:
-	for _, proj := range cache.Projects() {
-		var t tasks
-		if err := runGetter(&t, fmt.Sprintf("projects/%d/tasks", proj.Id),
-			"assignee,name,tags,completed_at,modified_at,created_at"); err != nil {
-			return nil, err
-		}
-		for _, tsk := range t.Data {
-			if len(tsk.Name) == 0 {
-				// Don't sync such tasks.
-				continue
-			}
-			if strings.HasSuffix(tsk.Name, ":") {
-				sec := Basic{
-					Id:   tsk.Id,
-					Name: tsk.Name,
-				}
-				sectionName = cache.AddSection(proj.Id, sec)
-				continue
-			}
+	out := make(chan x.WarriorTask, 100)
+	projects := cache.Projects()
+	errc := make(chan error, len(projects))
+	for _, proj := range projects {
+		go getTasks(proj, out, errc)
+	}
 
-			wt, err := convert(tsk, proj.Name, sectionName)
-			if err != nil {
-				return nil, errors.Wrap(err, "GetTasks")
-			}
+	wtasks := make([]x.WarriorTask, 0, 100)
+	done := make(chan struct{})
+	go func() {
+		for wt := range out {
 			wtasks = append(wtasks, wt)
-			count++
-			if count >= max {
-				break LOOP
-			}
+		}
+		done <- struct{}{}
+	}()
+
+	var rerr error
+	for _ = range projects {
+		if err := <-errc; err != nil {
+			rerr = err
 		}
 	}
-	return wtasks, nil
+	close(out)
+	<-done // Wait for all tasks to be picked up by goroutine.
+	return wtasks, rerr
 }
 
 // runPost would run a PUT or POST to Asana. No locks should be acquired.
