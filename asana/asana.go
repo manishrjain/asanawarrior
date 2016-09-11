@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -170,11 +171,11 @@ LOOP:
 	return wtasks, nil
 }
 
-// runPost would run a POST to Asana. No locks should be acquired.
-func runPost(suffix string, values url.Values) ([]byte, error) {
+// runPost would run a PUT or POST to Asana. No locks should be acquired.
+func runPost(method, suffix string, values url.Values) ([]byte, error) {
 	url := fmt.Sprintf("%s/%s", prefix, suffix)
 	fmt.Println(url, values.Encode())
-	req, err := http.NewRequest("POST", url, bytes.NewBufferString(values.Encode()))
+	req, err := http.NewRequest(method, url, bytes.NewBufferString(values.Encode()))
 	if err != nil {
 		log.Fatal(errors.Wrap(err, "runPost http.NewRequest"))
 	}
@@ -186,6 +187,35 @@ func runPost(suffix string, values url.Values) ([]byte, error) {
 	defer resp.Body.Close()
 
 	return ioutil.ReadAll(resp.Body)
+}
+
+func toTagIds(wt x.WarriorTask) []string {
+	var tags []string
+	for _, t := range wt.Tags {
+		tid := cache.TagId(t)
+		if tid == 0 {
+			tid = cache.CreateTag(t)
+			fmt.Println("New Tag crated. ID: %d", tid)
+		}
+		if tid > 0 {
+			tags = append(tags, strconv.FormatUint(tid, 10))
+		}
+	}
+	return tags
+}
+
+func updateSection(tid, pid uint64, section string) error {
+	v := url.Values{}
+	v.Add("project", strconv.FormatUint(pid, 10))
+
+	sid := cache.SectionId(pid, section)
+	if sid == 0 {
+		return fmt.Errorf("Unable to find section: %v", section)
+	}
+
+	v.Add("section", strconv.FormatUint(sid, 10))
+	_, err := runPost("POST", fmt.Sprintf("tasks/%d/addProject", tid), v)
+	return err
 }
 
 func AddNew(wt x.WarriorTask) (x.WarriorTask, error) {
@@ -206,19 +236,9 @@ func AddNew(wt x.WarriorTask) (x.WarriorTask, error) {
 		v.Add("assignee", strconv.FormatUint(aid, 10))
 	}
 
-	var tags []string
-	for _, t := range wt.Tags {
-		tid := cache.TagId(t)
-		if tid == 0 {
-			tid = cache.CreateTag(t)
-			fmt.Println("New Tag crated. ID: %d", tid)
-		}
-		if tid > 0 {
-			tags = append(tags, strconv.FormatUint(tid, 10))
-		}
-	}
+	tags := toTagIds(wt)
 	v.Add("tags", strings.Join(tags, ","))
-	resp, err := runPost("tasks", v)
+	resp, err := runPost("POST", "tasks", v)
 	if err != nil {
 		return e, errors.Wrap(err, "AddNew runPost")
 	}
@@ -233,15 +253,8 @@ func AddNew(wt x.WarriorTask) (x.WarriorTask, error) {
 	}
 
 	// Now set the project and section.
-	sid := cache.SectionId(pid, wt.Section)
-	v = url.Values{}
-	v.Add("project", strconv.FormatUint(pid, 10))
-	if sid > 0 {
-		v.Add("section", strconv.FormatUint(sid, 10))
-	}
-	_, err = runPost(fmt.Sprintf("tasks/%d/addProject", ot.Data.Id), v)
-	if err != nil {
-		return e, errors.Wrap(err, "addProject runPost")
+	if err := updateSection(ot.Data.Id, pid, wt.Section); err != nil {
+		return e, errors.Wrap(err, "AddNew updateSection")
 	}
 
 	// Now retrieve the task back again so we can sync it up with TW.
@@ -255,4 +268,56 @@ func AddNew(wt x.WarriorTask) (x.WarriorTask, error) {
 
 	sname := cache.SectionName(member.Project.Id, member.Section.Id)
 	return convert(ot.Data, member.Project.Name, sname)
+}
+
+func equal(t1 []string, t2 []string) bool {
+	if len(t1) != len(t2) {
+		return false
+	}
+	sort.Strings(t1)
+	sort.Strings(t2)
+	for i := range t1 {
+		if t1[i] != t2[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
+	v := url.Values{}
+	if tw.Name != asana.Name {
+		v.Add("name", tw.Name)
+	}
+	if tw.Assignee != asana.Assignee {
+		a := cache.UserId(tw.Assignee)
+		if a > 0 {
+			v.Add("assignee", strconv.FormatUint(a, 10))
+		}
+	}
+	if !equal(tw.Tags, asana.Tags) {
+		tags := toTagIds(tw)
+		v.Add("tags", strings.Join(tags, ","))
+	}
+
+	pid := cache.ProjectId(tw.Project)
+	if tw.Project != asana.Project {
+		if pid > 0 {
+			v.Add("projects", strconv.FormatUint(pid, 10))
+		}
+	}
+	if len(v) > 0 {
+		resp, err := runPost("PUT", "tasks/"+strconv.FormatUint(tw.Xid, 10), v)
+		if err != nil {
+			return errors.Wrap(err, "UpdateAsanaTask")
+		}
+		fmt.Println(string(resp))
+	}
+
+	if pid > 0 && tw.Section != asana.Section {
+		if err := updateSection(tw.Xid, pid, tw.Section); err != nil {
+			return errors.Wrap(err, "UpdateAsanaTask updateSection")
+		}
+	}
+	return nil
 }

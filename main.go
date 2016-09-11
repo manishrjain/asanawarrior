@@ -77,9 +77,6 @@ func syncMatch(m *Match) error {
 		return taskwarrior.OverwriteUuid(final, m.TaskWr.Uuid)
 	}
 
-	// HACK
-	return nil
-
 	if m.TaskWr.Xid == 0 {
 		fmt.Printf("Create in Taskwarrior: [%q]\n", m.Asana.Name)
 		return taskwarrior.AddNew(m.Asana)
@@ -95,9 +92,8 @@ func syncMatch(m *Match) error {
 	}
 
 	if approxAfter(m.TaskWr.Modified, m.Asana.Modified) {
-		fmt.Printf("Overwrite Asana: [%q]\n", m.Asana.Name)
-		// TODO: Implement this.
-		return nil
+		fmt.Printf("Overwrite Asana: [%q]\n", m.TaskWr.Name)
+		return asana.UpdateTask(m.TaskWr, m.Asana)
 	}
 
 	// Should be in sync. No checks are being done currently on individual fields.

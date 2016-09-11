@@ -172,7 +172,7 @@ func (c *acache) CreateTag(tname string) uint64 {
 	v := url.Values{}
 	v.Add("workspace", strconv.FormatUint(c.defaultWork, 10))
 	v.Add("name", tname)
-	resp, err := runPost("tags", v)
+	resp, err := runPost("POST", "tags", v)
 	if err != nil {
 		return 0
 	}
