@@ -119,7 +119,7 @@ func runSync() {
 	matches := generateMatches(atasks, twtasks)
 	for _, m := range matches {
 		if err := syncMatch(m); err != nil {
-			log.Fatal(err)
+			log.Printf("syncMatch error: %v %+v", err, m)
 		}
 	}
 	fmt.Println("All synced up. DONE.")

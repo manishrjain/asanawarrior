@@ -56,7 +56,7 @@ func (t task) ToWarriorTask() (x.WarriorTask, error) {
 		switch tg[0] {
 		case '@':
 			ass = tg[1:]
-		case '#':
+		case '_':
 			sec = tg[1:]
 		default:
 			tags = append(tags, tg)
@@ -130,7 +130,7 @@ func generateTags(wt x.WarriorTask) []string {
 		tags = append(tags, "@"+wt.Assignee)
 	}
 	if len(wt.Section) > 0 {
-		tags = append(tags, "#"+wt.Section)
+		tags = append(tags, "_"+wt.Section)
 	}
 	return tags
 }

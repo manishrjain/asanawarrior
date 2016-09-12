@@ -28,6 +28,7 @@ const (
 )
 
 func runGetter(i interface{}, suffix string, fields ...string) error {
+GETLOOP:
 	url := fmt.Sprintf("%s/%s?opt_fields=%s", prefix, suffix, strings.Join(fields, ","))
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -37,8 +38,11 @@ func runGetter(i interface{}, suffix string, fields ...string) error {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		log.Printf("runGetter url: [%v] err: [%v]", url, err)
+		time.Sleep(5 * time.Second)
+		goto GETLOOP
 	}
+
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
@@ -195,6 +199,7 @@ func GetTasks() ([]x.WarriorTask, error) {
 
 // runPost would run a PUT or POST to Asana. No locks should be acquired.
 func runPost(method, suffix string, values url.Values) ([]byte, error) {
+POSTLOOP:
 	url := fmt.Sprintf("%s/%s", prefix, suffix)
 	fmt.Println(url, values.Encode())
 	req, err := http.NewRequest(method, url, bytes.NewBufferString(values.Encode()))
@@ -206,6 +211,11 @@ func runPost(method, suffix string, values url.Values) ([]byte, error) {
 	req.Header.Add("content-type", "application/x-www-form-urlencoded")
 	client := &http.Client{}
 	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("runPost url: [%v] err: [%v]", url, err)
+		time.Sleep(5 * time.Second)
+		goto POSTLOOP
+	}
 	defer resp.Body.Close()
 
 	return ioutil.ReadAll(resp.Body)
@@ -217,7 +227,7 @@ func toTagIds(wt x.WarriorTask) []string {
 		tid := cache.TagId(t)
 		if tid == 0 {
 			tid = cache.CreateTag(t)
-			fmt.Println("New Tag crated. ID: %d", tid)
+			fmt.Printf("New Tag created. ID: %d", tid)
 		}
 		if tid > 0 {
 			tags = append(tags, strconv.FormatUint(tid, 10))
