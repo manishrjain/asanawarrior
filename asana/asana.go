@@ -240,11 +240,10 @@ func updateSection(tid, pid uint64, section string) error {
 	v.Add("project", strconv.FormatUint(pid, 10))
 
 	sid := cache.SectionId(pid, section)
-	if sid == 0 {
-		return fmt.Errorf("Unable to find section: %v", section)
+	if sid > 0 {
+		v.Add("section", strconv.FormatUint(sid, 10))
 	}
 
-	v.Add("section", strconv.FormatUint(sid, 10))
 	_, err := runPost("POST", fmt.Sprintf("tasks/%d/addProject", tid), v)
 	return err
 }
