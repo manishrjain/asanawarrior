@@ -164,6 +164,7 @@ func doImport(t task) error {
 	}
 
 	cmd := fmt.Sprintf("echo -n %q | task import", body)
+	// fmt.Println(cmd)
 	out, err := exec.Command("bash", "-c", cmd).Output()
 	if err != nil {
 		return errors.Wrapf(err, "doImport [%v] out:%q", cmd, out)

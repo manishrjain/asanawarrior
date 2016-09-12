@@ -9,6 +9,7 @@ import (
 	"github.com/manishrjain/asanawarrior/asana"
 	"github.com/manishrjain/asanawarrior/taskwarrior"
 	"github.com/manishrjain/asanawarrior/x"
+	"github.com/pkg/errors"
 )
 
 var duration = flag.Int("dur", 1, "How often to run sync, specified in minutes.")
@@ -89,13 +90,33 @@ func syncMatch(m *Match) error {
 	}
 
 	if approxAfter(m.Asana.Modified, m.TaskWr.Modified) {
-		fmt.Printf("Overwrite Taskwarrior: [%q]\n", m.Asana.Name)
+		fmt.Printf("Overwrite Taskwarrior: [%q] [time diff: %v]\n",
+			m.Asana.Name, m.Asana.Modified.Sub(m.TaskWr.Modified))
 		return taskwarrior.OverwriteUuid(m.Asana, m.TaskWr.Uuid)
 	}
 
 	if approxAfter(m.TaskWr.Modified, m.Asana.Modified) {
-		fmt.Printf("Overwrite Asana: [%q]\n", m.TaskWr.Name)
-		return asana.UpdateTask(m.TaskWr, m.Asana)
+		fmt.Printf("Overwrite Asana: [%q] [time diff: %v]\n",
+			m.TaskWr.Name, m.TaskWr.Modified.Sub(m.Asana.Modified))
+
+		if err := asana.UpdateTask(m.TaskWr, m.Asana); err != nil {
+			return errors.Wrap(err, "syncMatch overwrite asana")
+		}
+		return nil
+
+		// Now that we have updated Asana, let's get it back and overwrite Taskwarrior.
+		// This is important, otherwise, TW modification time always remains greater than Asana.
+		// That can happen if we only added or remoted tags. Those don't seem to update
+		// Asana modification timestamp.
+		// Which causes this section to get triggered on every sync.
+		// UPDATE: TW doesn't allow modification ts to jump back. So, this following code is NOOP.
+		/*
+			wt, err := asana.GetOneTask(m.Xid)
+			if err != nil {
+				return errors.Wrap(err, "syncMatch GetOneTask")
+			}
+			return taskwarrior.OverwriteUuid(wt, m.TaskWr.Uuid)
+		*/
 	}
 
 	// Should be in sync. No checks are being done currently on individual fields.

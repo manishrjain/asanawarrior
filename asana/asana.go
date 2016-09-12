@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -221,9 +220,9 @@ POSTLOOP:
 	return ioutil.ReadAll(resp.Body)
 }
 
-func toTagIds(wt x.WarriorTask) []string {
+func toTagIds(tnames []string) []string {
 	var tags []string
-	for _, t := range wt.Tags {
+	for _, t := range tnames {
 		tid := cache.TagId(t)
 		if tid == 0 {
 			tid = cache.CreateTag(t)
@@ -268,7 +267,7 @@ func AddNew(wt x.WarriorTask) (x.WarriorTask, error) {
 		v.Add("assignee", strconv.FormatUint(aid, 10))
 	}
 
-	tags := toTagIds(wt)
+	tags := toTagIds(wt.Tags)
 	v.Add("tags", strings.Join(tags, ","))
 	resp, err := runPost("POST", "tasks", v)
 	if err != nil {
@@ -290,30 +289,62 @@ func AddNew(wt x.WarriorTask) (x.WarriorTask, error) {
 	}
 
 	// Now retrieve the task back again so we can sync it up with TW.
-	if err := runGetter(&ot, "tasks/"+strconv.FormatUint(ot.Data.Id, 10)); err != nil {
-		return e, errors.Wrap(err, "AddNew runGetter")
-	}
-	if len(ot.Data.Memberships) == 0 {
-		return e, fmt.Errorf("Member of no project")
-	}
-	member := ot.Data.Memberships[0]
-
-	sname := cache.SectionName(member.Project.Id, member.Section.Id)
-	return convert(ot.Data, member.Project.Name, sname)
+	return GetOneTask(ot.Data.Id)
 }
 
-func equal(t1 []string, t2 []string) bool {
-	if len(t1) != len(t2) {
-		return false
+func diff(t1 []string, t2 []string) []string {
+	m := make(map[string]bool)
+	for _, s := range t2 {
+		m[s] = true
 	}
-	sort.Strings(t1)
-	sort.Strings(t2)
-	for i := range t1 {
-		if t1[i] != t2[i] {
-			return false
+
+	var result []string
+	for _, t := range t1 {
+		if has := m[t]; !has {
+			result = append(result, t)
 		}
 	}
-	return true
+	return result
+}
+
+func updateOneTag(tagid, taskid, instruction string, errc chan error) {
+	v := url.Values{}
+	v.Add("tag", tagid)
+	suffix := fmt.Sprintf("tasks/%s/%s", taskid, instruction)
+	resp, err := runPost("POST", suffix, v)
+	if err != nil {
+		errc <- errors.Wrap(err, "updateTags")
+		return
+	}
+	fmt.Println(string(resp))
+	errc <- nil
+}
+
+func updateTags(tw x.WarriorTask, asana x.WarriorTask) error {
+	taskid := strconv.FormatUint(tw.Xid, 10)
+	add := diff(tw.Tags, asana.Tags)
+	rem := diff(asana.Tags, tw.Tags)
+
+	addids := toTagIds(add)
+	remids := toTagIds(rem)
+	sz := len(addids) + len(remids)
+
+	errc := make(chan error, sz)
+	for _, id := range addids {
+		go updateOneTag(id, taskid, "addTag", errc)
+	}
+	for _, id := range remids {
+		go updateOneTag(id, taskid, "removeTag", errc)
+	}
+
+	var rerr error
+	for i := 0; i < sz; i++ {
+		if err := <-errc; err != nil {
+			rerr = err
+		}
+	}
+
+	return rerr
 }
 
 func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
@@ -326,10 +357,6 @@ func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
 		if a > 0 {
 			v.Add("assignee", strconv.FormatUint(a, 10))
 		}
-	}
-	if !equal(tw.Tags, asana.Tags) {
-		tags := toTagIds(tw)
-		v.Add("tags", strings.Join(tags, ","))
 	}
 
 	pid := cache.ProjectId(tw.Project)
@@ -345,11 +372,29 @@ func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
 		}
 		fmt.Println(string(resp))
 	}
-
+	if err := updateTags(tw, asana); err != nil {
+		return errors.Wrap(err, "asana.UpdateTask updateTags")
+	}
 	if pid > 0 && tw.Section != asana.Section {
 		if err := updateSection(tw.Xid, pid, tw.Section); err != nil {
-			return errors.Wrap(err, "UpdateAsanaTask updateSection")
+			return errors.Wrap(err, "asana.UpdateTask updateSection")
 		}
 	}
 	return nil
+}
+
+func GetOneTask(taskid uint64) (x.WarriorTask, error) {
+	e := x.WarriorTask{}
+	var ot oneTask
+	if err := runGetter(&ot, "tasks/"+strconv.FormatUint(taskid, 10)); err != nil {
+		return e, errors.Wrap(err, "AddNew runGetter")
+	}
+
+	if len(ot.Data.Memberships) == 0 {
+		return e, fmt.Errorf("Member of no project")
+	}
+	member := ot.Data.Memberships[0]
+
+	sname := cache.SectionName(member.Project.Id, member.Section.Id)
+	return convert(ot.Data, member.Project.Name, sname)
 }
