@@ -123,7 +123,6 @@ func GetTasks() ([]x.WarriorTask, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("Got tw tasks", len(tasks))
 
 	wtasks := make([]x.WarriorTask, 0, 100)
 	for _, t := range tasks {

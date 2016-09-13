@@ -92,6 +92,21 @@ func storeInDb(asanaTask, twTask x.WarriorTask) {
 	}
 }
 
+func deleteFromDb(twTask x.WarriorTask) {
+	if err := db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketName)
+		if err := b.Delete(asanaKey(twTask.Xid)); err != nil {
+			return err
+		}
+		if err := b.Delete(taskwKey(twTask.Uuid)); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		log.Fatalf("Delete from db failed with error: %v", err)
+	}
+}
+
 func getSyncTimestamps(xid uint64, uuid string) (time.Time, time.Time) {
 	var at, tt time.Time
 	db.View(func(tx *bolt.Tx) error {
@@ -118,7 +133,12 @@ func syncMatch(m *Match) error {
 			// This task used to have an Asana ID. But, we can't find the corresponding Asana task.
 			// It can happen when Asana task was deleted.
 			// If so, delete the task from TW as well.
-			return taskwarrior.Delete(m.TaskWr)
+			fmt.Printf("Delete from Taskwarrior: [%q]\n", m.TaskWr.Name)
+			if err := taskwarrior.Delete(m.TaskWr); err != nil {
+				return errors.Wrap(err, "Delete from Taskwarrior")
+			}
+			deleteFromDb(m.TaskWr)
+			return nil
 		}
 
 		// Create in Asana.
@@ -225,13 +245,13 @@ func runSync() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Asana results found:", len(atasks))
+	fmt.Printf("%27s: %d\n", "Asana results found", len(atasks))
 
 	twtasks, err := taskwarrior.GetTasks()
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Taskwarrior results found:", len(twtasks))
+	fmt.Printf("%27s: %d\n", "Taskwarrior results found", len(twtasks))
 
 	matches := generateMatches(atasks, twtasks)
 	for _, m := range matches {
