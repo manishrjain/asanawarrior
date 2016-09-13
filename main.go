@@ -4,8 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
+	"github.com/boltdb/bolt"
 	"github.com/manishrjain/asanawarrior/asana"
 	"github.com/manishrjain/asanawarrior/taskwarrior"
 	"github.com/manishrjain/asanawarrior/x"
@@ -13,6 +15,11 @@ import (
 )
 
 var duration = flag.Int("dur", 1, "How often to run sync, specified in minutes.")
+var dbpath = flag.String("db", os.Getenv("HOME")+"/.task/asanawarrior.db",
+	"File path for db which stores certain sync information.")
+
+var db *bolt.DB
+var bucketName = []byte("aw")
 
 type Match struct {
 	Xid    uint64
@@ -61,6 +68,48 @@ func approxAfter(t1, t2 time.Time) bool {
 	return t1.Sub(t2) > time.Second
 }
 
+func asanaKey(xid uint64) []byte {
+	return []byte(fmt.Sprintf("asana-%d", xid))
+}
+
+func taskwKey(uuid string) []byte {
+	return []byte(fmt.Sprintf("taskw-%s", uuid))
+}
+
+func storeInDb(asanaTask, twTask x.WarriorTask) {
+	if err := db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketName)
+		if err := b.Put(asanaKey(asanaTask.Xid), []byte(asanaTask.Modified.Format(time.RFC3339))); err != nil {
+			return err
+		}
+		if err := b.Put(taskwKey(twTask.Uuid), []byte(twTask.Modified.Format(time.RFC3339))); err != nil {
+			return err
+		}
+		return nil
+
+	}); err != nil {
+		log.Fatalf("Write to db failed with error: %v", err)
+	}
+}
+
+func getSyncTimestamps(xid uint64, uuid string) (time.Time, time.Time) {
+	var at, tt time.Time
+	db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketName)
+		ats := string(b.Get(asanaKey(xid)))
+		tts := string(b.Get(taskwKey(uuid)))
+		var err error
+		if at, err = time.Parse(time.RFC3339, ats); err != nil {
+			log.Fatalf("Unable to find asana ts: %v %v", xid, uuid)
+		}
+		if tt, err = time.Parse(time.RFC3339, tts); err != nil {
+			log.Fatalf("Unable to find taskwarrior ts: %v %v", xid, uuid)
+		}
+		return nil
+	})
+	return at, tt
+}
+
 func syncMatch(m *Match) error {
 	if m.Xid == 0 {
 		// Task not present in Asana, but present in TW.
@@ -72,53 +121,100 @@ func syncMatch(m *Match) error {
 			return taskwarrior.Delete(m.TaskWr)
 		}
 
+		// Create in Asana.
 		fmt.Printf("Create in Asana: [%q]\n", m.TaskWr.Name)
-		final, err := asana.AddNew(m.TaskWr)
+		asanaUpdated, err := asana.AddNew(m.TaskWr)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "create asana addnew")
 		}
-		return taskwarrior.OverwriteUuid(final, m.TaskWr.Uuid)
+
+		// Update TW with the Xid.
+		if err := taskwarrior.OverwriteUuid(asanaUpdated, m.TaskWr.Uuid); err != nil {
+			return errors.Wrap(err, "create asana overwriteuuid")
+		}
+		taskwUpdated, err := taskwarrior.GetTask(m.TaskWr.Uuid)
+		if err != nil {
+			return errors.Wrap(err, "create asana GetTask")
+		}
+
+		// Store Asana and Taskwarrior timestamps as of this sync.
+		storeInDb(asanaUpdated, taskwUpdated)
+		return nil
 	}
 
 	if m.TaskWr.Xid == 0 {
+		// No Asana xid found in Taskwarrior. So, create it.
+
 		fmt.Printf("Create in Taskwarrior: [%q]\n", m.Asana.Name)
-		return taskwarrior.AddNew(m.Asana)
+		uuid, err := taskwarrior.AddNew(m.Asana)
+		if err != nil {
+			return errors.Wrap(err, "syncMatch create in taskwarrior")
+		}
+		if len(uuid) == 0 {
+			log.Fatalf("Unable to parse UUID of new task: %+v", m.Asana)
+		}
+		updated, err := taskwarrior.GetTask(uuid)
+		if err != nil {
+			return err
+		}
+
+		// Store Asana and Taskwarrior timestamps as of this sync.
+		storeInDb(m.Asana, updated)
+		return nil
 	}
 
 	if m.Asana.Xid != m.TaskWr.Xid {
 		log.Fatalf("Xids should be matched: %+v\n", m)
 	}
 
-	if approxAfter(m.Asana.Modified, m.TaskWr.Modified) {
+	// Task is present in both Asana and TW. Compare the last sync timestamps.
+	asanaTs, taskwTs := getSyncTimestamps(m.Asana.Xid, m.TaskWr.Uuid)
+	if approxAfter(m.Asana.Modified, asanaTs) {
+		// Asana was updated. Overwrite TW.
 		fmt.Printf("Overwrite Taskwarrior: [%q] [time diff: %v]\n",
-			m.Asana.Name, m.Asana.Modified.Sub(m.TaskWr.Modified))
-		return taskwarrior.OverwriteUuid(m.Asana, m.TaskWr.Uuid)
+			m.Asana.Name, m.Asana.Modified.Sub(asanaTs))
+
+		if err := taskwarrior.OverwriteUuid(m.Asana, m.TaskWr.Uuid); err != nil {
+			return errors.Wrap(err, "Overwrite Taskwarrior")
+		}
+		updated, err := taskwarrior.GetTask(m.TaskWr.Uuid)
+		if err != nil {
+			return errors.Wrap(err, "Overwrite Taskwarrior GetTask")
+		}
+
+		storeInDb(m.Asana, updated)
+		return nil
 	}
 
-	if approxAfter(m.TaskWr.Modified, m.Asana.Modified) {
+	if approxAfter(m.TaskWr.Modified, taskwTs) {
+		// TW was updated. Overwrite Asana.
 		fmt.Printf("Overwrite Asana: [%q] [time diff: %v]\n",
-			m.TaskWr.Name, m.TaskWr.Modified.Sub(m.Asana.Modified))
+			m.TaskWr.Name, m.TaskWr.Modified.Sub(taskwTs))
 
 		if err := asana.UpdateTask(m.TaskWr, m.Asana); err != nil {
 			return errors.Wrap(err, "syncMatch overwrite asana")
 		}
+		updated, err := asana.GetOneTask(m.Xid)
+		if err != nil {
+			return errors.Wrap(err, "syncMatch GetOneTask")
+		}
+		storeInDb(updated, m.TaskWr)
 		return nil
-
-		// Now that we have updated Asana, let's get it back and overwrite Taskwarrior.
-		// This is important, otherwise, TW modification time always remains greater than Asana.
-		// That can happen if we only added or remoted tags. Those don't seem to update
-		// Asana modification timestamp.
-		// Which causes this section to get triggered on every sync.
-		// UPDATE: TW doesn't allow modification ts to jump back. So, this following code is NOOP.
-		/*
-			wt, err := asana.GetOneTask(m.Xid)
-			if err != nil {
-				return errors.Wrap(err, "syncMatch GetOneTask")
-			}
-			return taskwarrior.OverwriteUuid(wt, m.TaskWr.Uuid)
-		*/
 	}
 
+	// Now that we have updated Asana, let's get it back and overwrite Taskwarrior.
+	// This is important, otherwise, TW modification time always remains greater than Asana.
+	// That can happen if we only added or remoted tags. Those don't seem to update
+	// Asana modification timestamp.
+	// Which causes this section to get triggered on every sync.
+	// UPDATE: TW doesn't allow modification ts to jump back. So, this following code is NOOP.
+	/*
+		wt, err := asana.GetOneTask(m.Xid)
+		if err != nil {
+			return errors.Wrap(err, "syncMatch GetOneTask")
+		}
+		return taskwarrior.OverwriteUuid(wt, m.TaskWr.Uuid)
+	*/
 	// Should be in sync. No checks are being done currently on individual fields.
 	return nil
 }
@@ -149,6 +245,20 @@ func runSync() {
 func main() {
 	flag.Parse()
 	fmt.Println("Asanawarrior v0.7 - Bringing the power of Taskwarrior to Asana")
+
+	var err error
+	db, err = bolt.Open(*dbpath, 0600, nil)
+	if err != nil {
+		log.Fatalf("Unable to open bolt db at %v. Error: %v", *dbpath, err)
+	}
+	defer db.Close()
+	db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists(bucketName)
+		if err != nil {
+			log.Fatalf("Unable to create bucket in bolt db.")
+		}
+		return nil
+	})
 
 	// Initiate a sync right away.
 	fmt.Println()

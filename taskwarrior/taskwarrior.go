@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -27,6 +28,16 @@ type task struct {
 	Tags        []string `json:"tags,omitempty"`
 	Uuid        string   `json:"uuid,omitempty"`
 	Xid         string   `json:"xid,omitempty"`
+}
+
+var uuidExp *regexp.Regexp
+
+func init() {
+	var err error
+	uuidExp, err = regexp.Compile("([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{8})")
+	if err != nil {
+		log.Fatalf("regexp compile error: %v", err)
+	}
 }
 
 func (t task) ToWarriorTask() (x.WarriorTask, error) {
@@ -85,8 +96,14 @@ func (t task) ToWarriorTask() (x.WarriorTask, error) {
 	return wt, nil
 }
 
-func getTasks() ([]task, error) {
-	cmd := exec.Command("task", "export")
+func getTasks(filter string) ([]task, error) {
+	var cmd *exec.Cmd
+	if len(filter) > 0 {
+		cmd = exec.Command("task", filter, "export")
+	} else {
+		cmd = exec.Command("task", "export")
+	}
+
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err := cmd.Run()
@@ -102,10 +119,11 @@ func getTasks() ([]task, error) {
 }
 
 func GetTasks() ([]x.WarriorTask, error) {
-	tasks, err := getTasks()
+	tasks, err := getTasks("")
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("Got tw tasks", len(tasks))
 
 	wtasks := make([]x.WarriorTask, 0, 100)
 	for _, t := range tasks {
@@ -145,7 +163,6 @@ func createNew(wt x.WarriorTask) task {
 	t := task{
 		Created:     wt.Created.Format(stamp),
 		Description: wt.Name,
-		Modified:    wt.Modified.Format(stamp),
 		Project:     wt.Project,
 		Status:      status,
 		Tags:        tags,
@@ -157,23 +174,23 @@ func createNew(wt x.WarriorTask) task {
 	return t
 }
 
-func doImport(t task) error {
+// doImport imports the task and returns it's UUID and error.
+func doImport(t task) (string, error) {
 	body, err := json.Marshal(t)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	cmd := fmt.Sprintf("echo -n %q | task import", body)
 	// fmt.Println(cmd)
 	out, err := exec.Command("bash", "-c", cmd).Output()
 	if err != nil {
-		return errors.Wrapf(err, "doImport [%v] out:%q", cmd, out)
+		return "", errors.Wrapf(err, "doImport [%v] out:%q", cmd, out)
 	}
-	fmt.Println(string(out))
-	return nil
+	return uuidExp.FindString(string(out)), nil
 }
 
-func AddNew(wt x.WarriorTask) error {
+func AddNew(wt x.WarriorTask) (string, error) {
 	t := createNew(wt)
 	return doImport(t)
 }
@@ -181,7 +198,8 @@ func AddNew(wt x.WarriorTask) error {
 func OverwriteUuid(asana x.WarriorTask, uuid string) error {
 	t := createNew(asana)
 	t.Uuid = uuid
-	return doImport(t)
+	_, err := doImport(t)
+	return err
 }
 
 func Delete(prev x.WarriorTask) error {
@@ -189,5 +207,17 @@ func Delete(prev x.WarriorTask) error {
 	t := createNew(prev)
 	t.Uuid = prev.Uuid
 	t.Status = "deleted"
-	return doImport(t)
+	_, err := doImport(t)
+	return err
+}
+
+func GetTask(uuid string) (x.WarriorTask, error) {
+	tasks, err := getTasks(uuid)
+	if err != nil {
+		return x.WarriorTask{}, errors.Wrapf(err, "taskwarrior GetTask")
+	}
+	if len(tasks) > 1 {
+		log.Fatalf("Multiple tasks matching a UUID: %+v", tasks)
+	}
+	return tasks[0].ToWarriorTask()
 }
