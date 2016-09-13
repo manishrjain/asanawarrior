@@ -156,7 +156,8 @@ func main() {
 	runSync()
 
 	// And then do it at regular intervals.
-	for t := range time.Tick(time.Duration(*duration) * time.Minute) {
+	ticker := time.NewTicker(time.Duration(*duration) * time.Minute)
+	for t := range ticker.C {
 		fmt.Println()
 		fmt.Println("Starting sync at", t)
 		runSync()
