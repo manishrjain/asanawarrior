@@ -357,6 +357,9 @@ func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
 			v.Add("assignee", strconv.FormatUint(a, 10))
 		}
 	}
+	if !tw.Completed.IsZero() {
+		v.Add("completed", "true")
+	}
 
 	pid := cache.ProjectId(tw.Project)
 	if tw.Project != asana.Project {
