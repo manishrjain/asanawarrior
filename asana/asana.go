@@ -34,7 +34,9 @@ GETLOOP:
 		log.Fatal(err)
 	}
 	req.Header.Add("Authorization", "Bearer "+*token)
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 10 * time.Minute,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("runGetter url: [%v] err: [%v]", url, err)
@@ -208,7 +210,9 @@ POSTLOOP:
 
 	req.Header.Add("Authorization", "Bearer "+*token)
 	req.Header.Add("content-type", "application/x-www-form-urlencoded")
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 10 * time.Minute,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("runPost url: [%v] err: [%v]", url, err)
