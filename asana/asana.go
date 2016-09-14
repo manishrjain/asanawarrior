@@ -235,6 +235,13 @@ func toTagIds(tnames []string) []string {
 	return tags
 }
 
+func removeProject(tid, pid uint64) error {
+	v := url.Values{}
+	v.Add("project", strconv.FormatUint(pid, 10))
+	_, err := runPost("POST", fmt.Sprintf("tasks/%d/removeProject", tid), v)
+	return err
+}
+
 func updateSection(tid, pid uint64, section string) error {
 	v := url.Values{}
 	v.Add("project", strconv.FormatUint(pid, 10))
@@ -361,12 +368,6 @@ func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
 		v.Add("completed", "true")
 	}
 
-	pid := cache.ProjectId(tw.Project)
-	if tw.Project != asana.Project {
-		if pid > 0 {
-			v.Add("projects", strconv.FormatUint(pid, 10))
-		}
-	}
 	if len(v) > 0 {
 		resp, err := runPost("PUT", "tasks/"+strconv.FormatUint(tw.Xid, 10), v)
 		if err != nil {
@@ -374,12 +375,23 @@ func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
 		}
 		fmt.Println(string(resp))
 	}
+
 	if err := updateTags(tw, asana); err != nil {
 		return errors.Wrap(err, "asana.UpdateTask updateTags")
 	}
-	if pid > 0 && tw.Section != asana.Section {
+
+	// Update project or section if changed.
+	pid := cache.ProjectId(tw.Project)
+	if pid > 0 && (tw.Project != asana.Project || tw.Section != asana.Section) {
+		fmt.Printf("Updating project and section: %v %v", tw.Project, tw.Section)
 		if err := updateSection(tw.Xid, pid, tw.Section); err != nil {
 			return errors.Wrap(err, "asana.UpdateTask updateSection")
+		}
+		fmt.Printf("Removing from project: %v", asana.Project)
+		if previd := cache.ProjectId(asana.Project); previd > 0 {
+			if err := removeProject(tw.Xid, previd); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
