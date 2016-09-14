@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/pkg/errors"
 )
 
 type asection struct {
@@ -61,7 +63,7 @@ func (c *acache) update() error {
 	var err error
 	c.workspaces, err = getVarious("workspaces")
 	if err != nil {
-		return err
+		return errors.Wrap(err, "workspaces")
 	}
 	printBasics("Workspace", c.workspaces)
 	for _, w := range c.workspaces {
@@ -75,17 +77,17 @@ func (c *acache) update() error {
 
 	c.projects, err = getVarious("projects")
 	if err != nil {
-		return err
+		return errors.Wrap(err, "projects")
 	}
 	printBasics("Project", c.projects)
 
 	if err := c.updateTags(); err != nil {
-		return err
+		return errors.Wrap(err, "updateTags")
 	}
 
 	c.users, err = getVarious("users", "email")
 	if err != nil {
-		return err
+		return errors.Wrap(err, "users")
 	}
 	for i := range c.users {
 		u := &c.users[i]
