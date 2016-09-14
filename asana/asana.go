@@ -387,11 +387,15 @@ func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
 	// Update project or section if changed.
 	pid := cache.ProjectId(tw.Project)
 	if pid > 0 && (tw.Project != asana.Project || tw.Section != asana.Section) {
-		fmt.Printf("Updating project and section: %v %v", tw.Project, tw.Section)
+		fmt.Printf("Updating project and section: %v %v\n", tw.Project, tw.Section)
 		if err := updateSection(tw.Xid, pid, tw.Section); err != nil {
 			return errors.Wrap(err, "asana.UpdateTask updateSection")
 		}
-		fmt.Printf("Removing from project: %v", asana.Project)
+		if tw.Project == asana.Project {
+			return nil
+		}
+		// Project was changed. So, remove the last one.
+		fmt.Printf("Removing from project: %v\n", asana.Project)
 		if previd := cache.ProjectId(asana.Project); previd > 0 {
 			if err := removeProject(tw.Xid, previd); err != nil {
 				return err
