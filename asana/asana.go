@@ -40,7 +40,7 @@ RUNLOOP:
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("runRequest method: [%v] url: [%v] err: [%v]", url, err)
+		log.Printf("runRequest method: [%v] url: [%v] err: [%v]", method, url, err)
 		time.Sleep(5 * time.Second)
 		goto RUNLOOP
 	}
