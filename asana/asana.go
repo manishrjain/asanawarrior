@@ -327,12 +327,11 @@ func updateOneTag(tagid, taskid, instruction string, errc chan error) {
 	v := url.Values{}
 	v.Add("tag", tagid)
 	suffix := fmt.Sprintf("tasks/%s/%s", taskid, instruction)
-	resp, err := runPost("POST", suffix, v)
+	_, err := runPost("POST", suffix, v)
 	if err != nil {
 		errc <- errors.Wrap(err, "updateTags")
 		return
 	}
-	fmt.Println(string(resp))
 	errc <- nil
 }
 
@@ -374,7 +373,7 @@ func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
 			v.Add("assignee", strconv.FormatUint(a, 10))
 		}
 	}
-	if !tw.Completed.IsZero() {
+	if !tw.Completed.IsZero() && asana.Completed.IsZero() {
 		v.Add("completed", "true")
 	}
 
