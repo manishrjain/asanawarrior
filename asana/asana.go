@@ -26,31 +26,37 @@ const (
 	stamp  = "2006-01-02T15:04:05.999Z"
 )
 
-func runGetter(i interface{}, suffix string, fields ...string) error {
-GETLOOP:
-	url := fmt.Sprintf("%s/%s?opt_fields=%s", prefix, suffix, strings.Join(fields, ","))
-	req, err := http.NewRequest("GET", url, nil)
+func runRequest(method, url string) ([]byte, error) {
+RUNLOOP:
+	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	req.Header.Add("Authorization", "Bearer "+*token)
 	client := &http.Client{
 		Timeout: 10 * time.Minute,
 	}
+
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("runGetter url: [%v] err: [%v]", url, err)
+		log.Printf("runRequest method: [%v] url: [%v] err: [%v]", url, err)
 		time.Sleep(5 * time.Second)
-		goto GETLOOP
+		goto RUNLOOP
 	}
 
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	return ioutil.ReadAll(resp.Body)
+}
+
+func runGetter(i interface{}, suffix string, fields ...string) error {
+	url := fmt.Sprintf("%s/%s?opt_fields=%s", prefix, suffix, strings.Join(fields, ","))
+	body, err := runRequest("GET", url)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "runGetter")
 	}
 	if err := json.Unmarshal(body, i); err != nil {
-		return err
+		return errors.Wrap(err, "Unmarshal")
 	}
 	return nil
 }
@@ -419,4 +425,10 @@ func GetOneTask(taskid uint64) (x.WarriorTask, error) {
 
 	sname := cache.SectionName(member.Project.Id, member.Section.Id)
 	return convert(ot.Data, member.Project.Name, sname)
+}
+
+func Delete(taskid uint64) error {
+	url := fmt.Sprintf("%s/tasks/%d", prefix, taskid)
+	_, err := runRequest("DELETE", url)
+	return err
 }

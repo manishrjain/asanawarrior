@@ -89,6 +89,7 @@ func (t task) ToWarriorTask() (x.WarriorTask, error) {
 		Tags:     tags,
 		Xid:      xid,
 		Uuid:     t.Uuid,
+		Deleted:  t.Status == "deleted",
 	}
 	if !dts.IsZero() {
 		wt.Completed = dts
@@ -126,10 +127,6 @@ func GetTasks() ([]x.WarriorTask, error) {
 
 	wtasks := make([]x.WarriorTask, 0, 100)
 	for _, t := range tasks {
-		if t.Status == "deleted" {
-			continue
-		}
-
 		if wt, err := t.ToWarriorTask(); err == nil {
 			wtasks = append(wtasks, wt)
 		} else {

@@ -130,6 +130,11 @@ func syncMatch(m *Match) error {
 		// Task not present in Asana, but present in TW.
 
 		if m.TaskWr.Xid > 0 {
+			if m.TaskWr.Deleted {
+				// Already deleted from TW. Do nothing.
+				return nil
+			}
+
 			// This task used to have an Asana ID. But, we can't find the corresponding Asana task.
 			// It can happen when Asana task was deleted.
 			// If so, delete the task from TW as well.
@@ -187,7 +192,16 @@ func syncMatch(m *Match) error {
 		log.Fatalf("Xids should be matched: %+v\n", m)
 	}
 
-	// Task is present in both Asana and TW. Compare the last sync timestamps.
+	// Task is present in both Asana and TW.
+	if m.TaskWr.Deleted {
+		fmt.Printf("Deleting task from Asana: [%q]\n", m.TaskWr.Name)
+		if err := asana.Delete(m.Xid); err != nil {
+			return errors.Wrap(err, "Delete task from Asana")
+		}
+		deleteFromDb(m.TaskWr)
+		return nil
+	}
+
 	asanaTs, taskwTs := getSyncTimestamps(m.Asana.Xid, m.TaskWr.Uuid)
 	if approxAfter(m.Asana.Modified, asanaTs) {
 		// Asana was updated. Overwrite TW.
@@ -245,13 +259,21 @@ func runSync() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("%27s: %d\n", "Asana results found", len(atasks))
+	fmt.Printf("%27s: %d active\n", "Asana results found", len(atasks))
 
 	twtasks, err := taskwarrior.GetTasks()
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("%27s: %d\n", "Taskwarrior results found", len(twtasks))
+
+	deleted := 0
+	for _, t := range twtasks {
+		if t.Deleted {
+			deleted++
+		}
+	}
+	fmt.Printf("%27s: %d active, %d deleted\n",
+		"Taskwarrior results found", len(twtasks)-deleted, deleted)
 
 	matches := generateMatches(atasks, twtasks)
 	for _, m := range matches {

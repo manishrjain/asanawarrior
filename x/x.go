@@ -13,4 +13,7 @@ type WarriorTask struct {
 	Tags      []string
 	Xid       uint64
 	Uuid      string
+
+	// TaskWarrior
+	Deleted bool
 }
