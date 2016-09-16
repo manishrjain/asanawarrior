@@ -315,7 +315,7 @@ func processNotifications() {
 
 			} else {
 				notify.Push("Asanawarrior "+l[0].Title,
-					fmt.Sprintf("%s and %d more updates", l[0].Text, len(l)-1), "", notificator.UR_NORMAL)
+					fmt.Sprintf("%q and %d more updates", l[0].Text, len(l)-1), "", notificator.UR_NORMAL)
 			}
 			l = l[:0]
 
