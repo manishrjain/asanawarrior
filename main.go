@@ -18,8 +18,8 @@ import (
 var duration = flag.Int("dur", 1, "How often to run sync, specified in minutes.")
 var dbpath = flag.String("db", os.Getenv("HOME")+"/.task/asanawarrior.db",
 	"File path for db which stores certain sync information.")
-var maxNotifications = flag.Int("max_notify", 3,
-	"Maximum number of notifications to run per minute.")
+var notifyInterval = flag.Int("interval", 10,
+	"Minimum duration in seconds between successive notifications. Set to zero for no notifications.")
 
 var db *bolt.DB
 var bucketName = []byte("aw")
@@ -300,28 +300,27 @@ func pushNotification(title, text string) {
 }
 
 func processNotifications() {
-	ticker := time.NewTicker(time.Minute)
+	ni := time.Duration(*notifyInterval)
+	ticker := time.NewTicker(ni * time.Second)
 	l := make([]notification, 0, 10)
 	for {
 		select {
 		case <-ticker.C:
 			if len(l) == 0 {
-				// do nothing.
+				// pass
 
-			} else if len(l) <= *maxNotifications {
-				for _, n := range l {
-					notify.Push("Asanawarrior "+n.Title, n.Text, "", notificator.UR_NORMAL)
-				}
+			} else if len(l) == 1 {
+				n := l[0]
+				notify.Push("Asanawarrior "+n.Title, n.Text, "", notificator.UR_NORMAL)
 
 			} else {
-				notify.Push("Asanawarrior "+l[0].Title, l[0].Text, "", notificator.UR_NORMAL)
-				notify.Push("Asanawarrior", fmt.Sprintf("and %d more updates", len(l)-1),
-					"", notificator.UR_NORMAL)
+				notify.Push("Asanawarrior "+l[0].Title,
+					fmt.Sprintf("%s and %d more updates", l[0].Text, len(l)-1), "", notificator.UR_NORMAL)
 			}
 			l = l[:0]
 
 		case n := <-notifications:
-			if *maxNotifications > 0 {
+			if *notifyInterval > 0 {
 				l = append(l, n)
 			}
 		}
