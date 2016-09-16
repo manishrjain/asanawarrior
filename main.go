@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/0xAX/notificator"
 	"github.com/boltdb/bolt"
 	"github.com/manishrjain/asanawarrior/asana"
 	"github.com/manishrjain/asanawarrior/taskwarrior"
@@ -17,15 +18,25 @@ import (
 var duration = flag.Int("dur", 1, "How often to run sync, specified in minutes.")
 var dbpath = flag.String("db", os.Getenv("HOME")+"/.task/asanawarrior.db",
 	"File path for db which stores certain sync information.")
+var maxNotifications = flag.Int("max_notify", 3,
+	"Maximum number of notifications to run per minute.")
 
 var db *bolt.DB
 var bucketName = []byte("aw")
+var notify *notificator.Notificator
 
 type Match struct {
 	Xid    uint64
 	Asana  x.WarriorTask
 	TaskWr x.WarriorTask
 }
+
+type notification struct {
+	Title string
+	Text  string
+}
+
+var notifications = make(chan notification, 100)
 
 // generateMatches matches all tasks from Asana to Taskwarrior, and stores non-matches as
 // individual entries from each, without the other being present.
@@ -139,6 +150,8 @@ func syncMatch(m *Match) error {
 			// It can happen when Asana task was deleted.
 			// If so, delete the task from TW as well.
 			fmt.Printf("Delete from Taskwarrior: [%q]\n", m.TaskWr.Name)
+			pushNotification("Delete", m.TaskWr.Name)
+
 			if err := taskwarrior.Delete(m.TaskWr); err != nil {
 				return errors.Wrap(err, "Delete from Taskwarrior")
 			}
@@ -171,6 +184,7 @@ func syncMatch(m *Match) error {
 		// No Asana xid found in Taskwarrior. So, create it.
 
 		fmt.Printf("Create in Taskwarrior: [%q]\n", m.Asana.Name)
+		pushNotification("Create", m.Asana.Name)
 		uuid, err := taskwarrior.AddNew(m.Asana)
 		if err != nil {
 			return errors.Wrap(err, "syncMatch create in taskwarrior")
@@ -195,6 +209,7 @@ func syncMatch(m *Match) error {
 	// Task is present in both Asana and TW.
 	if m.TaskWr.Deleted {
 		fmt.Printf("Deleting task from Asana: [%q]\n", m.TaskWr.Name)
+		pushNotification("Deleting from Asana", m.TaskWr.Name)
 		if err := asana.Delete(m.Xid); err != nil {
 			return errors.Wrap(err, "Delete task from Asana")
 		}
@@ -207,6 +222,7 @@ func syncMatch(m *Match) error {
 		// Asana was updated. Overwrite TW.
 		fmt.Printf("Overwrite Taskwarrior: [%q] [time diff: %v]\n",
 			m.Asana.Name, m.Asana.Modified.Sub(asanaTs))
+		pushNotification("Update", m.Asana.Name)
 
 		if err := taskwarrior.OverwriteUuid(m.Asana, m.TaskWr.Uuid); err != nil {
 			return errors.Wrap(err, "Overwrite Taskwarrior")
@@ -235,21 +251,6 @@ func syncMatch(m *Match) error {
 		storeInDb(updated, m.TaskWr)
 		return nil
 	}
-
-	// Now that we have updated Asana, let's get it back and overwrite Taskwarrior.
-	// This is important, otherwise, TW modification time always remains greater than Asana.
-	// That can happen if we only added or remoted tags. Those don't seem to update
-	// Asana modification timestamp.
-	// Which causes this section to get triggered on every sync.
-	// UPDATE: TW doesn't allow modification ts to jump back. So, this following code is NOOP.
-	/*
-		wt, err := asana.GetOneTask(m.Xid)
-		if err != nil {
-			return errors.Wrap(err, "syncMatch GetOneTask")
-		}
-		return taskwarrior.OverwriteUuid(wt, m.TaskWr.Uuid)
-	*/
-	// Should be in sync. No checks are being done currently on individual fields.
 	return nil
 }
 
@@ -284,9 +285,56 @@ func runSync() {
 	fmt.Println("All synced up. DONE.")
 }
 
+func pushNotification(title, text string) {
+	if notify == nil {
+		return
+	}
+	n := notification{Title: title, Text: text}
+
+	select {
+	case notifications <- n:
+	default:
+		// Let it go.
+	}
+
+}
+
+func processNotifications() {
+	ticker := time.NewTicker(time.Minute)
+	l := make([]notification, 0, 10)
+	for {
+		select {
+		case <-ticker.C:
+			if len(l) == 0 {
+				// do nothing.
+
+			} else if len(l) <= *maxNotifications {
+				for _, n := range l {
+					notify.Push("Asanawarrior "+n.Title, n.Text, "", notificator.UR_NORMAL)
+				}
+
+			} else {
+				notify.Push("Asanawarrior "+l[0].Title, l[0].Text, "", notificator.UR_NORMAL)
+				notify.Push("Asanawarrior", fmt.Sprintf("and %d more updates", len(l)-1),
+					"", notificator.UR_NORMAL)
+			}
+			l = l[:0]
+
+		case n := <-notifications:
+			if *maxNotifications > 0 {
+				l = append(l, n)
+			}
+		}
+	}
+}
+
 func main() {
 	flag.Parse()
 	fmt.Println("Asanawarrior v0.7 - Bringing the power of Taskwarrior to Asana")
+	notify = notificator.New(notificator.Options{
+		AppName: "Asanawarrior",
+	})
+	go processNotifications()
 
 	var err error
 	db, err = bolt.Open(*dbpath, 0600, nil)
