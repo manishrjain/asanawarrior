@@ -207,17 +207,8 @@ func syncMatch(m *Match) error {
 	}
 
 	// Task is present in both Asana and TW.
-	if m.TaskWr.Deleted {
-		fmt.Printf("Deleting task from Asana: [%q]\n", m.TaskWr.Name)
-		pushNotification("Deleting from Asana", m.TaskWr.Name)
-		if err := asana.Delete(m.Xid); err != nil {
-			return errors.Wrap(err, "Delete task from Asana")
-		}
-		deleteFromDb(m.TaskWr)
-		return nil
-	}
-
 	asanaTs, taskwTs := getSyncTimestamps(m.Asana.Xid, m.TaskWr.Uuid)
+
 	if approxAfter(m.Asana.Modified, asanaTs) {
 		// Asana was updated. Overwrite TW.
 		fmt.Printf("Overwrite Taskwarrior: [%q] [time diff: %v]\n",
@@ -233,6 +224,17 @@ func syncMatch(m *Match) error {
 		}
 
 		storeInDb(m.Asana, updated)
+		return nil
+	}
+
+	// If task has been marked as deleted since the last modification.
+	if m.TaskWr.Deleted && approxAfter(m.TaskWr.Modified, taskwTs) {
+		fmt.Printf("Deleting task from Asana: [%q]\n", m.TaskWr.Name)
+		pushNotification("Deleting from Asana", m.TaskWr.Name)
+		if err := asana.Delete(m.Xid); err != nil {
+			return errors.Wrap(err, "Delete task from Asana")
+		}
+		deleteFromDb(m.TaskWr)
 		return nil
 	}
 
