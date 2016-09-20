@@ -285,10 +285,12 @@ func AddNew(wt x.WarriorTask) (x.WarriorTask, error) {
 	v := url.Values{}
 	v.Add("workspace", strconv.FormatUint(cache.Workspace(), 10))
 	v.Add("name", wt.Name)
-	fmt.Println("Assignee", wt.Assignee)
 	aid := cache.UserId(wt.Assignee)
 	if aid > 0 {
 		v.Add("assignee", strconv.FormatUint(aid, 10))
+	}
+	if !wt.Completed.IsZero() {
+		v.Add("completed", "true")
 	}
 
 	tags := toTagIds(wt.Tags)
