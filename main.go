@@ -288,12 +288,14 @@ func runSync() {
 
 	if len(deletes) > *maxDeletes {
 		fmt.Printf(`
+==========================================
 Task deletions requested from Asana : %d
 Max allowed per sync                : %d
 Most likely this is a mistake!
-If so, please run 'rm -f ~/.task' to clean up Taskwarrior (or wherever else you store it's state).
+If so, please run 'rm -f ~/.task/*' to clean up Taskwarrior (or wherever else you store it's state).
 If you genuinely want to delete all these tasks, then set the 'deletes' flag to a higher value.
 Crashing to avoid mass deletes from Asana!
+==========================================
 `, len(deletes), *maxDeletes)
 		os.Exit(1)
 	}
@@ -350,7 +352,7 @@ func processNotifications() {
 
 func main() {
 	flag.Parse()
-	fmt.Println("Asanawarrior v0.7 - Bringing the power of Taskwarrior to Asana")
+	fmt.Println("Asanawarrior v0.8 - Bringing the power of Taskwarrior to Asana")
 	notify = notificator.New(notificator.Options{
 		AppName: "Asanawarrior",
 	})
