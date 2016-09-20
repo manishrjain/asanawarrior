@@ -184,11 +184,19 @@ func GetTasks() ([]x.WarriorTask, error) {
 		go getTasks(proj, out, errc)
 	}
 
+	// Asana can send back the same task multiple times, if it's part of multiple projects.
+	// So, let's dedup them.
+	seen := make(map[uint64]bool)
 	wtasks := make([]x.WarriorTask, 0, 100)
 	done := make(chan struct{})
 	go func() {
 		for wt := range out {
+			if _, has := seen[wt.Xid]; has {
+				// ignore
+				continue
+			}
 			wtasks = append(wtasks, wt)
+			seen[wt.Xid] = true
 		}
 		done <- struct{}{}
 	}()

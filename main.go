@@ -20,6 +20,9 @@ var dbpath = flag.String("db", os.Getenv("HOME")+"/.task/asanawarrior.db",
 	"File path for db which stores certain sync information.")
 var notifyInterval = flag.Int("interval", 10,
 	"Minimum duration in seconds between successive notifications. Set to zero for no notifications.")
+var maxDeletes = flag.Int("deletes", 5,
+	"If Asanawarrior sees more than these number of deletes, it's going to crash to"+
+		" protect your Asana from mass deletion.")
 
 var db *bolt.DB
 var bucketName = []byte("aw")
@@ -90,10 +93,12 @@ func taskwKey(uuid string) []byte {
 func storeInDb(asanaTask, twTask x.WarriorTask) {
 	if err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketName)
-		if err := b.Put(asanaKey(asanaTask.Xid), []byte(asanaTask.Modified.Format(time.RFC3339))); err != nil {
+		if err := b.Put(asanaKey(asanaTask.Xid),
+			[]byte(asanaTask.Modified.Format(time.RFC3339))); err != nil {
 			return err
 		}
-		if err := b.Put(taskwKey(twTask.Uuid), []byte(twTask.Modified.Format(time.RFC3339))); err != nil {
+		if err := b.Put(taskwKey(twTask.Uuid),
+			[]byte(twTask.Modified.Format(time.RFC3339))); err != nil {
 			return err
 		}
 		return nil
@@ -121,7 +126,7 @@ func getSyncTimestamps(xid uint64, uuid string) (time.Time, time.Time) {
 	return at, tt
 }
 
-func syncMatch(m *Match) error {
+func syncMatch(m *Match, deleteFromAsana *[]*Match) error {
 	if m.Xid == 0 {
 		// Task not present in Asana, but present in TW.
 
@@ -206,20 +211,30 @@ func syncMatch(m *Match) error {
 		if err != nil {
 			return errors.Wrap(err, "Overwrite Taskwarrior GetTask")
 		}
-
 		storeInDb(m.Asana, updated)
 		return nil
 	}
 
 	// If task has been marked as deleted since the last modification.
 	if m.TaskWr.Deleted && approxAfter(m.TaskWr.Modified, taskwTs) {
+		if deleteFromAsana != nil {
+			*deleteFromAsana = append(*deleteFromAsana, m)
+			return nil
+		}
+
 		fmt.Printf("Deleting task from Asana: [%q]\n", m.TaskWr.Name)
 		pushNotification("Deleting from Asana", m.TaskWr.Name)
 		if err := asana.Delete(m.Xid); err != nil {
 			return errors.Wrap(err, "Delete task from Asana")
 		}
-		// Don't delete from boltdb, because Asana task can be undeleted,
-		// in which case this would come back.
+
+		// Don't delete from boltdb, but update the timestamps,
+		// so we don't reapply this deletion.
+		// We don't need to retrieve Asana task back, because we won't be able to. It has been deleted.
+		// If the task gets undeleted, Asana won't modify the timestamp. So, let's set it to zero
+		// in our records, so if it comes back, we'll see it as an update.
+		m.Asana.Modified = time.Time{}
+		storeInDb(m.Asana, m.TaskWr)
 		return nil
 	}
 
@@ -264,11 +279,30 @@ func runSync() {
 		"Taskwarrior results found", len(twtasks)-deleted, deleted)
 
 	matches := generateMatches(atasks, twtasks)
+	deletes := make([]*Match, 0, 10)
 	for _, m := range matches {
-		if err := syncMatch(m); err != nil {
+		if err := syncMatch(m, &deletes); err != nil {
 			log.Printf("syncMatch error: %v %+v", err, m)
 		}
 	}
+
+	if len(deletes) > *maxDeletes {
+		fmt.Printf(`
+Task deletions requested from Asana : %d
+Max allowed per sync                : %d
+Most likely this is a mistake!
+If so, please run 'rm -f ~/.task' to clean up Taskwarrior (or wherever else you store it's state).
+If you genuinely want to delete all these tasks, then set the 'deletes' flag to a higher value.
+Crashing to avoid mass deletes from Asana!
+`, len(deletes), *maxDeletes)
+		os.Exit(1)
+	}
+	for _, m := range deletes {
+		if err := syncMatch(m, nil); err != nil {
+			log.Printf("syncMatch error: %v %+v", err, m)
+		}
+	}
+
 	fmt.Println("All synced up. DONE.")
 }
 
