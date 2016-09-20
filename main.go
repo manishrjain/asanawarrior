@@ -104,6 +104,8 @@ func storeInDb(asanaTask, twTask x.WarriorTask) {
 }
 
 func deleteFromDb(twTask x.WarriorTask) {
+	return
+	// HACK. We probably don't need to do this.
 	if err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketName)
 		if err := b.Delete(asanaKey(twTask.Xid)); err != nil {
@@ -155,7 +157,7 @@ func syncMatch(m *Match) error {
 			if err := taskwarrior.Delete(m.TaskWr); err != nil {
 				return errors.Wrap(err, "Delete from Taskwarrior")
 			}
-			deleteFromDb(m.TaskWr)
+			// deleteFromDb(m.TaskWr)
 			return nil
 		}
 
@@ -234,7 +236,8 @@ func syncMatch(m *Match) error {
 		if err := asana.Delete(m.Xid); err != nil {
 			return errors.Wrap(err, "Delete task from Asana")
 		}
-		deleteFromDb(m.TaskWr)
+		// deleteFromDb(m.TaskWr)
+		// Don't delete from database, because Asana task can be undeleted, in which case this would come back.
 		return nil
 	}
 
