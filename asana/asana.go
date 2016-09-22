@@ -53,10 +53,10 @@ func runGetter(i interface{}, suffix string, fields ...string) error {
 	url := fmt.Sprintf("%s/%s?opt_fields=%s", prefix, suffix, strings.Join(fields, ","))
 	body, err := runRequest("GET", url)
 	if err != nil {
-		return errors.Wrap(err, "runGetter")
+		return errors.Wrapf(err, "runGetter: %q", body)
 	}
 	if err := json.Unmarshal(body, i); err != nil {
-		return errors.Wrap(err, "Unmarshal")
+		return errors.Wrapf(err, "Unmarshal: %q", body)
 	}
 	return nil
 }

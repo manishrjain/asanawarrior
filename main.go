@@ -260,7 +260,7 @@ func runSync() {
 	atasks, err := asana.GetTasks()
 	// atasks, err := asana.GetTasks(1)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("%+v", err)
 	}
 	fmt.Printf("%27s: %d active\n", "Asana results found", len(atasks))
 
