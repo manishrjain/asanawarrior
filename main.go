@@ -352,7 +352,7 @@ func processNotifications() {
 
 func main() {
 	flag.Parse()
-	fmt.Println("Asanawarrior v0.8 - Bringing the power of Taskwarrior to Asana")
+	fmt.Println("Asanawarrior v1.0 - Bringing the power of Taskwarrior to Asana")
 	notify = notificator.New(notificator.Options{
 		AppName: "Asanawarrior",
 	})
