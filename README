@@ -1,6 +1,6 @@
 Asanawarrior
 ------------
 
-AW provides bidirectional sync between Asana and Taskwarrior so you can use Taskwarrior as a CLI to Asana.
+AW provides bidirectional sync between Asana and Taskwarrior so you can use Taskwarrior as a CLI to Asana. It's being used by various folks at Dgraph for all interactions with Asana tasks.
 
-Documentation is located at [wiki.dgraph.io/Asanawarrior](https://wiki.dgraph.io/Asanawarrior).
+Documentation is located at https://wiki.dgraph.io/Asanawarrior.
