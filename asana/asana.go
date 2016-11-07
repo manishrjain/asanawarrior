@@ -39,12 +39,12 @@ RUNLOOP:
 	}
 
 	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("runRequest method: [%v] url: [%v] err: [%v]", method, url, err)
+	statusCode := resp.StatusCode
+	if err != nil || statusCode != http.StatusOK {
+		log.Printf("runRequest method: [%v] url: [%v] status: [%v] err: [%v]", method, url, http.StatusText(statusCode), err)
 		time.Sleep(5 * time.Second)
 		goto RUNLOOP
 	}
-
 	defer resp.Body.Close()
 	return ioutil.ReadAll(resp.Body)
 }
