@@ -39,9 +39,15 @@ RUNLOOP:
 	}
 
 	resp, err := client.Do(req)
-	statusCode := resp.StatusCode
-	if err != nil || statusCode != http.StatusOK {
-		log.Printf("runRequest method: [%v] url: [%v] status: [%v] err: [%v]", method, url, http.StatusText(statusCode), err)
+	if err != nil {
+		log.Printf("runRequest method: [%v] url: [%v] err: [%v]", method, url, err)
+		time.Sleep(5 * time.Second)
+		goto RUNLOOP
+	}
+	code := resp.StatusCode
+	if code != http.StatusOK {
+		log.Printf("runRequest method: [%v] url: [%v] status: [%v]",
+			method, url, http.StatusText(resp.StatusCode))
 		time.Sleep(5 * time.Second)
 		goto RUNLOOP
 	}
