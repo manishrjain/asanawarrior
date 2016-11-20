@@ -75,7 +75,7 @@ func (c *acache) update() error {
 		log.Fatalf("Unable to find [%q] domain. Found: %+v", *domain, c.workspaces)
 	}
 
-	c.projects, err = getVarious("projects")
+	c.projects, err = getVarious("workspaces/" + (strconv.Itoa(int(c.defaultWork))) + "/projects")
 	if err != nil {
 		return errors.Wrap(err, "projects")
 	}
