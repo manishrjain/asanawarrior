@@ -44,7 +44,7 @@ func printBasics(title string, bs []Basic) {
 // updateTags updates the tags. Appropriate locks should be acquired by the caller.
 func (c *acache) updateTags() error {
 	var err error
-	c.tags, err = getVarious("tags")
+	c.tags, err = getVarious("tags", "name")
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func (c *acache) update() error {
 	defer c.Unlock()
 
 	var err error
-	c.workspaces, err = getVarious("workspaces")
+	c.workspaces, err = getVarious("workspaces", "name")
 	if err != nil {
 		return errors.Wrap(err, "workspaces")
 	}
