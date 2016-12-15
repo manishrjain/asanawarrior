@@ -19,6 +19,7 @@ import (
 
 var token = flag.String("token", "", "Token provided by Asana.")
 var domain = flag.String("domain", "", "Workspace name, generally your domain name in Asana.")
+var verbose = flag.Bool("verbose", false, "Verbose output.")
 var cache *acache = new(acache)
 
 const (
@@ -28,12 +29,19 @@ const (
 
 func runRequest(method, url string) ([]byte, error) {
 RUNLOOP:
+	if *verbose {
+		fmt.Printf("METHOD: %v URL: %v\n", method, url)
+	}
 	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	req.Header.Add("Authorization", "Bearer "+*token)
+	if *verbose {
+		fmt.Printf("HEADER: %+v\n", req.Header)
+	}
+
 	client := &http.Client{
 		Timeout: 10 * time.Minute,
 	}
@@ -56,7 +64,13 @@ RUNLOOP:
 }
 
 func runGetter(i interface{}, suffix string, fields ...string) error {
-	url := fmt.Sprintf("%s/%s?opt_fields=%s", prefix, suffix, strings.Join(fields, ","))
+	var url string
+	if len(fields) > 0 {
+		url = fmt.Sprintf("%s/%s?opt_fields=%s", prefix, suffix, strings.Join(fields, ","))
+	} else {
+		url = fmt.Sprintf("%s/%s", prefix, suffix)
+	}
+
 	body, err := runRequest("GET", url)
 	if err != nil {
 		return errors.Wrapf(err, "runGetter: %q", body)
@@ -434,7 +448,7 @@ func GetOneTask(taskid uint64) (x.WarriorTask, error) {
 	}
 
 	if len(ot.Data.Memberships) == 0 {
-		return e, fmt.Errorf("Member of no project")
+		return e, errors.New("Member of no project")
 	}
 	member := ot.Data.Memberships[0]
 
