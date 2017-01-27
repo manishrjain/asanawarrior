@@ -405,6 +405,8 @@ func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
 	}
 	if !tw.Completed.IsZero() && asana.Completed.IsZero() {
 		v.Add("completed", "true")
+	} else if !asana.Completed.IsZero() && tw.Completed.IsZero() {
+		v.Add("completed", "false")
 	}
 
 	if len(v) > 0 {
